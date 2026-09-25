@@ -342,6 +342,6 @@ server <- function(input, output) {
 # 3. Launch Application
 shinyApp(ui = ui, server = server)
 
-```
 
-Run this block now. The window will open and display the step curve with its shaded confidence band with no external errors.
+
+#Run this block The window will open and display the step curve with its shaded confidence band.
