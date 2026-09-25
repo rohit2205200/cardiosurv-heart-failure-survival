@@ -8,7 +8,7 @@ If you use this model, R Shiny codebase, or methodology in your academic researc
 
 ```bibtex
 @misc{patil2026cardiosurv,
-  author = {Avinash Patil},
+  author = {Rohit Patil},
   title = {Dynamic Inpatient Prognostic Modeling: A Semi-Parametric Survival Analysis and Counterfactual Decision-Support System},
   year = {2026},
   publisher = {GitHub},
