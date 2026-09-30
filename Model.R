@@ -1,15 +1,45 @@
+# ==============================================================================
+# PACKAGE CHECK & INSTALLATION BLOCK
+# ==============================================================================
+required_packages <- c(
+  "survival", 
+  "survminer", 
+  "tidyverse", 
+  "gtsummary", 
+  "readr", 
+  "ggplot2", 
+  "scales", 
+  "shiny"
+)
 
-library(survival)
-library(survminer)
-library(tidyverse)
-library(gtsummary)
-library(readr)
-raw_data<- read_csv("D:/project folder/heart_failure_clinical_records_dataset.csv")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages) > 0) {
+  install.packages(new_packages, repos = "https://cloud.r-project.org")
+}
+
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+# ==============================================================================
+# DATA LOADING (PORTABLE FILE PATH HANDLER)
+# ==============================================================================
+# If the file is not in the working directory, prompts an interactive file chooser
+data_file <- "heart_failure_clinical_records_dataset.csv"
+if (!file.exists(data_file)) {
+  if (interactive()) {
+    message("Dataset not found in working directory. Please select 'heart_failure_clinical_records_dataset.csv':")
+    data_file <- file.choose()
+  } else {
+    stop("Data file not found. Ensure 'heart_failure_clinical_records_dataset.csv' is in your working directory.")
+  }
+}
+
+raw_data <- read_csv(data_file)
 # Verify dimensions (should be 299 rows and 13 columns)
 dim(raw_data)
 head(raw_data)
 # Quick sanity check
 glimpse(raw_data)
+
 df <- raw_data %>%
   mutate(
     # Ensure binary indicators are factor variables for proper Table 1 rendering
@@ -71,6 +101,7 @@ table1 <- df %>%
 
 # Display Table 1 in Viewer
 table1
+
 # 1. Create a binary clinical threshold
 df <- df %>%
   mutate(ef_group = ifelse(ejection_fraction < 30, "EF < 30% (High Risk)", "EF >= 30% (Normal/Mild)"))
@@ -160,8 +191,8 @@ hr_data <- data.frame(
 hr_data$Variable <- factor(hr_data$Variable, levels = rev(hr_data$Variable))
 
 forest_plot <- ggplot(hr_data, aes(x = HR, y = Variable)) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "firebrick", size = 0.8) +
-  geom_errorbarh(aes(xmin = Lower_CI, xmax = Upper_CI), height = 0.25, color = "#2b7489", size = 1) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "firebrick", linewidth = 0.8) +
+  geom_errorbarh(aes(xmin = Lower_CI, xmax = Upper_CI), height = 0.25, color = "#2b7489", linewidth = 1) +
   geom_point(size = 3.5, color = "#2b7489") +
   scale_x_log10(breaks = c(0.5, 0.8, 1.0, 1.2, 1.5, 2.0)) +
   labs(
@@ -341,7 +372,3 @@ server <- function(input, output) {
 
 # 3. Launch Application
 shinyApp(ui = ui, server = server)
-
-
-
-#Run this block The window will open and display the step curve with its shaded confidence band.
