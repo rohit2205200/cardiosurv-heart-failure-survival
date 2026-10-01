@@ -219,6 +219,9 @@ print(ph_test)
 # 7. Plot Schoenfeld Residuals Diagnostics
 ggcoxzph(ph_test)
 
+# ==============================================================================
+# PHASE 4: INTERACTIVE SHINY APPLICATION
+# ==============================================================================
 if(!require(shiny)) install.packages("shiny")
 
 library(shiny)
@@ -240,6 +243,7 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
+      width = 4,
       h4("Patient Baseline Covariates", style = "color: #2b6cb0; font-weight: bold;"),
       
       sliderInput("app_age", "Age (Years):", 
@@ -261,41 +265,80 @@ ui <- fluidPage(
                   choices = c("No", "Yes"), selected = "No"),
       
       hr(),
+      # Live selection readout: lets you inspect every selected slider/select value
+      div(
+        style = "background-color: #f7fafc; border: 1px solid #cbd5e0; border-radius: 6px; padding: 12px;",
+        h5("Current Selection Summary:", style = "color: #2b6cb0; font-weight: bold; margin-top: 0;"),
+        htmlOutput("live_selections")
+      ),
+      br(),
       helpText("Adjust parameters to observe real-time recalculation of the patient's individual survival curve S(t | X).")
     ),
     
     mainPanel(
-      h4("Predicted Individualized Survival Trajectory", style = "color: #2d3748; font-weight: bold;"),
-      plotOutput("survPlot", height = "380px"),
-      hr(),
-      fluidRow(
-        column(4, 
-               wellPanel(
-                 style = "background-color: #ebf8ff; border-color: #bee3f8; text-align: center;",
-                 h5("90-Day Survival", style = "color: #2b6cb0; margin: 0;"),
-                 h2(textOutput("prob90"), style = "color: #2b6cb0; font-weight: bold; margin: 5px 0;")
-               )
+      width = 8,
+      tabsetPanel(
+        # Tab 1: Shows two charts on web together (Trajectory + Forest Plot)
+        tabPanel(
+          "Prognosis & Dual Charts",
+          br(),
+          fluidRow(
+            column(4, 
+                   wellPanel(
+                     style = "background-color: #ebf8ff; border-color: #bee3f8; text-align: center;",
+                     h5("90-Day Survival", style = "color: #2b6cb0; margin: 0;"),
+                     h2(textOutput("prob90"), style = "color: #2b6cb0; font-weight: bold; margin: 5px 0;")
+                   )
+            ),
+            column(4, 
+                   wellPanel(
+                     style = "background-color: #ebf8ff; border-color: #bee3f8; text-align: center;",
+                     h5("180-Day Survival", style = "color: #2b6cb0; margin: 0;"),
+                     h2(textOutput("prob180"), style = "color: #2b6cb0; font-weight: bold; margin: 5px 0;")
+                   )
+            ),
+            column(4, 
+                   wellPanel(
+                     style = "background-color: #fffaf0; border-color: #feebc8; text-align: center;",
+                     h5("Prognostic Risk Score", style = "color: #c05621; margin: 0;"),
+                     h2(textOutput("riskTier"), style = "font-weight: bold; margin: 5px 0;")
+                   )
+            )
+          ),
+          hr(),
+          fluidRow(
+            column(6,
+                   h4("Patient Survival Curve", style = "color: #2d3748; font-weight: bold; text-align: center;"),
+                   plotOutput("survPlot", height = "390px")
+            ),
+            column(6,
+                   h4("Cox Model Hazard Ratios", style = "color: #2d3748; font-weight: bold; text-align: center;"),
+                   plotOutput("forestPlotWeb", height = "390px")
+            )
+          )
         ),
-        column(4, 
-               wellPanel(
-                 style = "background-color: #ebf8ff; border-color: #bee3f8; text-align: center;",
-                 h5("180-Day Survival", style = "color: #2b6cb0; margin: 0;"),
-                 h2(textOutput("prob180"), style = "color: #2b6cb0; font-weight: bold; margin: 5px 0;")
-               )
+        
+        # Tab 2: Cohort Kaplan-Meier Survival Curve
+        tabPanel(
+          "Cohort KM Curve",
+          br(),
+          h4("Kaplan-Meier Survival Curves Stratified by Ejection Fraction", style = "color: #2d3748; font-weight: bold;"),
+          plotOutput("kmCohortWebPlot", height = "520px")
         ),
-        column(4, 
-               wellPanel(
-                 style = "background-color: #fffaf0; border-color: #feebc8; text-align: center;",
-                 h5("Prognostic Risk Score", style = "color: #c05621; margin: 0;"),
-                 h2(textOutput("riskTier"), style = "font-weight: bold; margin: 5px 0;")
-               )
+        
+        # Tab 3: Model Diagnostics (Schoenfeld Residuals)
+        tabPanel(
+          "PH Diagnostics",
+          br(),
+          h4("Schoenfeld Residuals Diagnostics (cox.zph)", style = "color: #2d3748; font-weight: bold;"),
+          plotOutput("zphWebPlot", height = "520px")
         )
       )
     )
   )
 )
 
-# 2. Server Logic (Fixed Plot Rendering)
+# 2. Server Logic
 server <- function(input, output) {
   
   # Reactive dataframe holding user inputs
@@ -310,12 +353,26 @@ server <- function(input, output) {
     )
   })
   
+  # Live readout of active selections
+  output$live_selections <- renderUI({
+    HTML(paste0(
+      "<ul style='margin-bottom: 0; padding-left: 20px;'>",
+      "<li><b>Age:</b> ", input$app_age, " years</li>",
+      "<li><b>Biological Sex:</b> ", input$app_sex, "</li>",
+      "<li><b>Ejection Fraction:</b> ", input$app_ef, "%</li>",
+      "<li><b>Serum Creatinine:</b> ", input$app_creatinine, " mg/dL</li>",
+      "<li><b>Serum Sodium:</b> ", input$app_sodium, " mEq/L</li>",
+      "<li><b>Hypertension:</b> ", input$app_hbp, "</li>",
+      "</ul>"
+    ))
+  })
+  
   # Compute individualized survival fit
   patient_surv <- reactive({
     survfit(cox_model_app, newdata = patient_profile())
   })
   
-  # Fixed Plot: uses standard geom_ribbon and geom_step
+  # Web Chart 1: Individualized Survival Trajectory
   output$survPlot <- renderPlot({
     sf <- patient_surv()
     plot_df <- data.frame(
@@ -330,17 +387,32 @@ server <- function(input, output) {
       geom_step(color = "#2b6cb0", linewidth = 1.2) +
       geom_vline(xintercept = c(90, 180), linetype = "dashed", color = "gray50") +
       scale_y_continuous(limits = c(0, 1), labels = scales::percent_format(accuracy = 1)) +
-      scale_x_continuous(breaks = seq(0, 280, by = 30)) +
+      scale_x_continuous(breaks = seq(0, 280, by = 60)) +
       labs(
         x = "Time Following Admission (Days)",
-        y = "Cumulative Survival Probability S(t)",
-        caption = "Dashed markers at 90 and 180 days. Shaded band indicates 95% Confidence Interval."
+        y = "Survival Probability S(t)",
+        caption = "Dashed: 90/180 d. Shaded: 95% CI."
       ) +
-      theme_minimal(base_size = 14) +
+      theme_minimal(base_size = 12) +
       theme(
         panel.grid.minor = element_blank(),
         axis.title = element_text(face = "bold")
       )
+  })
+  
+  # Web Chart 2: Forest Plot
+  output$forestPlotWeb <- renderPlot({
+    forest_plot
+  })
+  
+  # Web Chart 3: Cohort Kaplan-Meier Plot
+  output$kmCohortWebPlot <- renderPlot({
+    print(km_plot)
+  })
+  
+  # Web Chart 4: Schoenfeld Residuals Diagnostic Plot
+  output$zphWebPlot <- renderPlot({
+    ggcoxzph(ph_test)
   })
   
   # Calculate 90-day survival probability
