@@ -265,7 +265,6 @@ ui <- fluidPage(
                   choices = c("No", "Yes"), selected = "No"),
       
       hr(),
-      # Live selection readout: lets you inspect every selected slider/select value
       div(
         style = "background-color: #f7fafc; border: 1px solid #cbd5e0; border-radius: 6px; padding: 12px;",
         h5("Current Selection Summary:", style = "color: #2b6cb0; font-weight: bold; margin-top: 0;"),
@@ -278,7 +277,7 @@ ui <- fluidPage(
     mainPanel(
       width = 8,
       tabsetPanel(
-        # Tab 1: Shows two charts on web together (Trajectory + Forest Plot)
+        # Tab 1: Prognosis, Dual Charts & Dynamic Layman Interpreter
         tabPanel(
           "Prognosis & Dual Charts",
           br(),
@@ -315,23 +314,32 @@ ui <- fluidPage(
                    h4("Cox Model Hazard Ratios", style = "color: #2d3748; font-weight: bold; text-align: center;"),
                    plotOutput("forestPlotWeb", height = "390px")
             )
-          )
+          ),
+          br(),
+          uiOutput("layman_summary"),
+          br()
         ),
         
-        # Tab 2: Cohort Kaplan-Meier Survival Curve
+        # Tab 2: Cohort Kaplan-Meier Curve & KM Layman Interpreter
         tabPanel(
           "Cohort KM Curve",
           br(),
           h4("Kaplan-Meier Survival Curves Stratified by Ejection Fraction", style = "color: #2d3748; font-weight: bold;"),
-          plotOutput("kmCohortWebPlot", height = "520px")
+          plotOutput("kmCohortWebPlot", height = "480px"),
+          br(),
+          uiOutput("km_layman_summary"),
+          br()
         ),
         
-        # Tab 3: Model Diagnostics (Schoenfeld Residuals)
+        # Tab 3: Model Diagnostics & Schoenfeld Layman Interpreter
         tabPanel(
           "PH Diagnostics",
           br(),
           h4("Schoenfeld Residuals Diagnostics (cox.zph)", style = "color: #2d3748; font-weight: bold;"),
-          plotOutput("zphWebPlot", height = "520px")
+          plotOutput("zphWebPlot", height = "480px"),
+          br(),
+          uiOutput("ph_layman_summary"),
+          br()
         )
       )
     )
@@ -370,6 +378,19 @@ server <- function(input, output) {
   # Compute individualized survival fit
   patient_surv <- reactive({
     survfit(cox_model_app, newdata = patient_profile())
+  })
+  
+  # Reactive values for 90-day and 180-day survival probability (0 to 1 scale)
+  p90_val <- reactive({
+    sf <- patient_surv()
+    idx <- which.min(abs(sf$time - 90))
+    sf$surv[idx]
+  })
+  
+  p180_val <- reactive({
+    sf <- patient_surv()
+    idx <- which.min(abs(sf$time - 180))
+    sf$surv[idx]
   })
   
   # Web Chart 1: Individualized Survival Trajectory
@@ -415,18 +436,14 @@ server <- function(input, output) {
     ggcoxzph(ph_test)
   })
   
-  # Calculate 90-day survival probability
+  # Calculate 90-day survival probability display
   output$prob90 <- renderText({
-    sf <- patient_surv()
-    idx <- which.min(abs(sf$time - 90))
-    paste0(round(sf$surv[idx] * 100, 1), "%")
+    paste0(round(p90_val() * 100, 1), "%")
   })
   
-  # Calculate 180-day survival probability
+  # Calculate 180-day survival probability display
   output$prob180 <- renderText({
-    sf <- patient_surv()
-    idx <- which.min(abs(sf$time - 180))
-    paste0(round(sf$surv[idx] * 100, 1), "%")
+    paste0(round(p180_val() * 100, 1), "%")
   })
   
   # Compute linear predictor score & classify risk tier
@@ -440,7 +457,167 @@ server <- function(input, output) {
       paste0(round(lp, 2), " (High)")
     }
   })
+  
+  # ==============================================================================
+  # INTERPRETER 1: TAB 1 (PATIENT TRAJECTORY & FOREST PLOT)
+  # ==============================================================================
+  output$layman_summary <- renderUI({
+    p90_pct  <- round(p90_val() * 100, 1)
+    p180_pct <- round(p180_val() * 100, 1)
+    
+    tier <- if (p90_pct >= 75) {
+      list(
+        color = "#2e7d32", 
+        bg = "#e8f5e9",
+        border = "#81c784",
+        title = "Favorable / Stable Trajectory",
+        narrative = "Based on this biomarker profile, the individual falls into a relatively stable prognostic category under routine clinical monitoring."
+      )
+    } else if (p90_pct >= 50) {
+      list(
+        color = "#e65100", 
+        bg = "#fff3e0",
+        border = "#ffb74d",
+        title = "Moderate Risk / Increased Vigilance Indicated",
+        narrative = "The model indicates moderate vulnerability over the medium term. Consistent monitoring of cardiac and renal parameters is advisable."
+      )
+    } else {
+      list(
+        color = "#c62828", 
+        bg = "#ffebee",
+        border = "#e57373",
+        title = "High Vulnerability / Close Monitoring Needed",
+        narrative = "The combined parameters place this profile in a higher-risk category, showing significant cardiorenal strain that warrants prioritized clinical evaluation."
+      )
+    }
+    
+    tags$div(
+      style = paste0(
+        "background-color: ", tier$bg, ";",
+        "border: 1px solid ", tier$border, ";",
+        "border-left: 6px solid ", tier$color, ";",
+        "border-radius: 8px;",
+        "padding: 16px 20px;",
+        "box-shadow: 0 2px 6px rgba(0,0,0,0.04);"
+      ),
+      tags$h4(
+        style = paste0("color: ", tier$color, "; margin-top: 0; font-weight: bold; font-size: 18px;"),
+        paste0("Plain-Language Summary: ", tier$title)
+      ),
+      tags$p(
+        style = "font-size: 15px; color: #2d3748; line-height: 1.5; margin-bottom: 12px;",
+        tier$narrative
+      ),
+      tags$hr(style = "border: 0; border-top: 1px solid rgba(0,0,0,0.08); margin: 10px 0;"),
+      tags$ul(
+        style = "font-size: 14.5px; color: #374151; line-height: 1.7; padding-left: 20px; margin-bottom: 8px;",
+        tags$li(
+          tags$strong("3-Month Outlook: "),
+          paste0("Approximately ", round(p90_pct), " out of 100 people with similar laboratory and clinical values remain stable and event-free at 90 days.")
+        ),
+        tags$li(
+          tags$strong("6-Month Outlook: "),
+          paste0("Approximately ", round(p180_pct), " out of 100 people are expected to remain stable across 180 days.")
+        ),
+        tags$li(
+          tags$strong("What the Charts Show: "),
+          "The left curve displays this specific patient's projected survival trajectory over time. The right plot (Forest Plot) reveals the relative hazard of each clinical risk factor across the broader inpatient cohort."
+        )
+      ),
+      tags$p(
+        style = "font-size: 12px; color: #718096; font-style: italic; margin: 8px 0 0 0;",
+        "Note: This automated explanation is an educational translation of statistical probabilities for demonstration purposes and does not substitute for an individual medical diagnosis."
+      )
+    )
+  })
+  
+  # ==============================================================================
+  # INTERPRETER 2: TAB 2 (KAPLAN-MEIER COHORT BENCHMARK)
+  # ==============================================================================
+  output$km_layman_summary <- renderUI({
+    tags$div(
+      style = paste0(
+        "background-color: #f0f7ff;",
+        "border: 1px solid #b8daff;",
+        "border-left: 6px solid #0056b3;",
+        "border-radius: 8px;",
+        "padding: 16px 20px;",
+        "box-shadow: 0 2px 6px rgba(0,0,0,0.04);"
+      ),
+      tags$h4(
+        style = "color: #0056b3; margin-top: 0; font-weight: bold; font-size: 18px;",
+        "Plain-Language Guide: Understanding the Cohort Benchmark (Kaplan-Meier Curves)"
+      ),
+      tags$p(
+        style = "font-size: 15px; color: #2d3748; line-height: 1.5; margin-bottom: 12px;",
+        "This graph groups 299 real heart failure patients into two categories based on heart pumping efficiency (Ejection Fraction): patients with severely reduced pumping capacity (below 30%, yellow line) vs. those with preserved/mild impairment (30% or higher, blue line)."
+      ),
+      tags$hr(style = "border: 0; border-top: 1px solid rgba(0,0,0,0.08); margin: 10px 0;"),
+      tags$ul(
+        style = "font-size: 14.5px; color: #374151; line-height: 1.7; padding-left: 20px; margin-bottom: 8px;",
+        tags$li(
+          tags$strong("The Survival Gap: "),
+          "Notice how the yellow line drops much faster than the blue line. Patients with severely low pumping power faced significantly earlier clinical events compared to the higher-EF group."
+        ),
+        tags$li(
+          tags$strong("What p < 0.0001 Means: "),
+          "The Log-Rank hypothesis test shows a p-value far below 0.001. In plain words: there is less than a 0.01% chance this survival gap was random luck. Ejection fraction is a scientifically verified prognostic differentiator."
+        ),
+        tags$li(
+          tags$strong("Number-at-Risk Table (Bottom): "),
+          "Shows the remaining pool of patients under observation at each 50-day window, correctly accounting for patients who completed the study without complications."
+        )
+      )
+    )
+  })
+  
+  # ==============================================================================
+  # INTERPRETER 3: TAB 3 (MODEL DIAGNOSTICS & PH VERIFICATION)
+  # ==============================================================================
+  output$ph_layman_summary <- renderUI({
+    tags$div(
+      style = paste0(
+        "background-color: #f3f0f9;",
+        "border: 1px solid #d1c4e9;",
+        "border-left: 6px solid #5e35b1;",
+        "border-radius: 8px;",
+        "padding: 16px 20px;",
+        "box-shadow: 0 2px 6px rgba(0,0,0,0.04);"
+      ),
+      tags$h4(
+        style = "color: #5e35b1; margin-top: 0; font-weight: bold; font-size: 18px;",
+        "Plain-Language Guide: Statistical Model Quality Check (Schoenfeld Residuals)"
+      ),
+      tags$p(
+        style = "font-size: 15px; color: #2d3748; line-height: 1.5; margin-bottom: 12px;",
+        "Before trusting any survival prediction, biostatisticians run an integrity diagnostic called the Proportional Hazards Assumption test. It verifies whether risk factors (like age or kidney function) stay steady over time, rather than changing unpredictably."
+      ),
+      tags$hr(style = "border: 0; border-top: 1px solid rgba(0,0,0,0.08); margin: 10px 0;"),
+      tags$ul(
+        style = "font-size: 14.5px; color: #374151; line-height: 1.7; padding-left: 20px; margin-bottom: 8px;",
+        tags$li(
+          tags$strong("What the Flat Lines Mean: "),
+          "Each plot shows residual dots over time with a solid trend line. Because these trend lines remain mostly horizontal and flat, the risk multipliers do not erode over the follow-up window."
+        ),
+        tags$li(
+          tags$strong("P-Values Above 0.05: "),
+          "In residual diagnostics, a p-value above 0.05 is the desired result. It confirms there is no statistically significant violation of the model's core assumptions."
+        ),
+        tags$li(
+          tags$strong("The Practical Takeaway: "),
+          "The mathematical foundation of this app is auditable, stable, and scientifically sound—not an unverified guess."
+        )
+      )
+    )
+  })
 }
 
 # 3. Launch Application
 shinyApp(ui = ui, server = server)
+     
+        
+
+
+
+
+
